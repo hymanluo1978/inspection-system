@@ -1,0 +1,13 @@
+{
+  "token": "",
+  "repo": "hymanluo1978/inspection-system",
+  "branch": "main",
+  "redirectUrl": "",
+  "redirectEnabled": false,
+  "formEnabled": true,
+  "formTitle": "施工现场安全质量巡检表",
+  "formDescription": "扫描二维码，按项检查并填写记录",
+  "siteName": "施工现场巡检系统",
+  "uploadCompressWidth": 1200,
+  "uploadQuality": 0.75
+}

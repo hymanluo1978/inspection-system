@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0e14">
+<title>施工现场安全质量巡检</title>
+<link rel="stylesheet" href="assets/css/style.css">
+<style>
+  .form-progress { display: flex; gap: 4px; margin-bottom: 20px; }
+  .form-progress .dot { flex:1; height:3px; border-radius:2px; background:var(--border-primary); }
+  .form-progress .dot.active { background:var(--accent); }
+  .success-screen { text-align:center; padding:40px 20px; }
+  .success-screen .icon { font-size:4rem; margin-bottom:16px; }
+  .success-screen h2 { margin-bottom:8px; }
+  .success-screen p { color:var(--text-secondary); font-size:0.9rem; margin-bottom:20px; }
+  .hidden-works-container { margin-bottom:12px; }
+  .conclusion-select { min-width:120px; }
+  .submit-area { margin-top:24px; padding-top:16px; border-top:1px solid var(--border-primary); }
+  .submit-area .hint { font-size:0.78rem; color:var(--text-muted); text-align:center; margin-top:8px; }
+  .photo-count { font-size:0.78rem; color:var(--text-muted); }
+  .error-display { color:var(--danger); padding:20px; text-align:center; }
+  .error-display pre { background:var(--bg-input); padding:12px; border-radius:8px; font-size:0.8rem; text-align:left; overflow-x:auto; margin-top:8px; }
+  .hw-photos-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:4px; margin-bottom:8px; }
+  .hw-photos-grid .photo-item { aspect-ratio:1; border-radius:6px; overflow:hidden; background:var(--bg-input); border:1px solid var(--border-primary); }
+  .hw-photos-grid .photo-item img { width:100%; height:100%; object-fit:cover; }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="logo">
+    <div class="logo-icon">检</div>
+    <span id="header-title">施工现场巡检</span>
+  </div>
+  <nav class="nav-links"><a href="admin.html">管理</a></nav>
+</header>
+
+<main class="app-main" id="app-content">
+  <div class="loading"><div class="spinner"></div><span>加载中...</span></div>
+</main>
+
+<script src="assets/js/app.js"></script>
+<script>
+/* ============================================================
+   DATA & RENDERER
+   ============================================================ */
+const ITEMS = {
+  safety: ['临时用电','临边防护','灭火器','水枪水带','登高作业','动火作业','卫生情况'],
+  process: ['轻钢龙骨','石膏板封板','防水施工','地砖施工','墙砖施工','一遍腻子','二遍腻子','腻子打磨','涂料施工','自流平','地板施工','户内门施工','墙布施工','橱柜施工','淋浴屏施工','台面施工','五金洁具施工'],
+  tile: ['实测人','实测时间','墙地砖空鼓','高低差','垂直度','平整度','阴阳角'],
+  putty: ['实测人','实测时间','顶棚极差','阴阳角','垂直度','平整度','三边两线','阴阳角直线度'],
+  hw: [
+    { name:'轻钢龙骨隐蔽验收', id:'hw1' },
+    { name:'厨卫间防水切片验收', id:'hw2' },
+    { name:'厨卫间蓄水验收', id:'hw3' },
+    { name:'墙布基层验收', id:'hw4' }
+  ]
+};
+
+function esc(s) { if(!s)return ''; var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function renderForm() {
+  function multiRow(items) {
+    return items.map(function(it) {
+      var ph = (it==='实测时间')?'如：2026-05-10':(it==='实测人')?'填写姓名':'如：100%';
+      return '<div class="multi-row-item"><label class="item-label">'+esc(it)+'</label><input type="text" class="form-input" data-key="'+esc(it)+'" placeholder="'+ph+'"></div>';
+    }).join('');
+  }
+  function hiddenWorks() {
+    return '<div class="sub-group-grid">'+
+      ITEMS.hw.map(function(hw){
+        return '<div class="inspection-group" data-hw="'+hw.id+'"><h4>'+esc(hw.name)+'</h4>'+
+          '<div class="form-group"><label class="form-label">验收人</label><input type="text" class="form-input" data-hw-field="inspector" placeholder="验收人姓名"></div>'+
+          '<div class="form-group"><label class="form-label">验收结论</label><select class="form-select conclusion-select" data-hw-field="conclusion"><option value="">请选择</option><option value="合格">合格</option><option value="不合格">不合格</option><option value="待整改">待整改</option></select></div>'+
+          '<div class="form-group"><label class="form-label">验收照片</label><div class="photo-upload"><div class="hw-photos-grid" id="hw-grid-'+hw.id+'"></div>'+
+          '<button type="button" class="btn btn-secondary btn-sm btn-block hw-photo-btn" data-hw-id="'+hw.id+'">📸 拍照</button>'+
+          '<input type="file" accept="image/*" capture="environment" style="display:none" class="hw-photos-input" data-hw-input="'+hw.id+'"></div></div></div>';
+      }).join('')+'</div>';
+  }
+  return '<form id="inspection-form" novalidate>'+
+    '<div class="form-progress" id="form-progress"></div>'+
+
+    '<div class="card" data-group="1"><div class="card-header"><div class="card-title">📋 基本信息</div></div>'+
+    '<div class="form-group"><label class="form-label">楼号 <span class="required">*</span></label><input type="text" class="form-input" id="field-building" placeholder="如：16" required></div>'+
+    '<div class="form-group"><label class="form-label">房号 <span class="required">*</span></label><input type="text" class="form-input" id="field-unit" placeholder="如：301" required></div>'+
+    '<div class="form-group"><label class="form-label">巡查时间 <span class="required">*</span></label><input type="datetime-local" class="form-input" id="field-inspection-time" required></div></div>'+
+
+    '<div class="card" data-group="2"><div class="card-header"><div class="card-title">🛡️ 现场安全文明巡查</div></div><p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:12px;">有问题写问题，无问题写"无"</p><div class="multi-row" id="safety-container">'+multiRow(ITEMS.safety)+'</div></div>'+
+
+    '<div class="card" data-group="3"><div class="card-header"><div class="card-title">🔧 工序完成情况</div></div><p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:12px;">按百分比填写完成情况</p><div class="multi-row" id="process-container">'+multiRow(ITEMS.process)+'</div></div>'+
+
+    '<div class="card" data-group="4"><div class="card-header"><div class="card-title">🔍 隐蔽验收</div></div><div class="hidden-works-container" id="hidden-works-container">'+hiddenWorks()+'</div></div>'+
+
+    '<div class="card" data-group="5"><div class="card-header"><div class="card-title">📸 现场巡检照片</div></div><p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px;">验收情况拍照上传</p><div class="photo-upload"><div class="photo-grid" id="site-photos-grid"></div>'+
+    '<button type="button" class="btn btn-secondary btn-sm btn-block" id="site-photos-add">📸 添加照片</button>'+
+    '<input type="file" accept="image/*" capture="environment" style="display:none" id="site-photos-input" multiple><div class="photo-count" id="site-photos-count" style="margin-top:6px;"></div></div></div>'+
+
+    '<div class="card" data-group="6"><div class="card-header"><div class="card-title">📏 墙地砖空鼓实测</div></div><p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:12px;">按合格率填写</p><div class="multi-row" id="tile-container">'+multiRow(ITEMS.tile)+'</div></div>'+
+
+    '<div class="card" data-group="7"><div class="card-header"><div class="card-title">📐 腻子面实测合格率</div></div><p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:12px;">按合格率填写</p><div class="multi-row" id="putty-container">'+multiRow(ITEMS.putty)+'</div></div>'+
+
+    '<div class="card" data-group="8"><div class="card-header"><div class="card-title">💧 卫生间完成面蓄水验收</div></div>'+
+    '<div class="form-group"><label class="form-label">验收人</label><input type="text" class="form-input" id="bathroom-inspector" placeholder="验收人姓名"></div>'+
+    '<div class="form-group"><label class="form-label">验收结论</label><select class="form-select" id="bathroom-conclusion"><option value="">请选择</option><option value="合格">合格</option><option value="不合格">不合格</option><option value="待整改">待整改</option></select></div>'+
+    '<div class="form-group"><label class="form-label">验收照片</label><div class="photo-upload"><div class="photo-grid" id="bathroom-photos-grid"></div>'+
+    '<button type="button" class="btn btn-secondary btn-sm btn-block" id="bathroom-photos-add">📸 拍照</button>'+
+    '<input type="file" accept="image/*" capture="environment" style="display:none" id="bathroom-photos-input"></div></div></div>'+
+
+    '<div class="card submit-area"><button type="submit" class="btn btn-primary btn-lg btn-block" id="submit-btn">✅ 提交巡检记录</button><div class="hint">提交后数据将自动保存至云端，不可撤回</div></div>'+
+  '</form>';
+}
+
+/* ============================================================
+   BOOT - simplified
+   ============================================================ */
+(function() {
+  var mainEl = document.getElementById('app-content');
+  var headerEl = document.getElementById('header-title');
+
+  function showError(msg, detail) {
+    mainEl.innerHTML = '<div class="card error-display"><h3>⚠️ 加载失败</h3><p>'+esc(msg)+'</p>'+(detail?'<pre>'+esc(detail)+'</pre>':'')+'<button class="btn btn-primary" onclick="location.reload()" style="margin-top:12px;">重新加载</button></div>';
+  }
+
+  // Read token from URL
+  var params = new URLSearchParams(window.location.search);
+  var urlToken = params.get('token');
+
+  // Start initialization
+  (async function() {
+    try {
+      // Step 1: Initialize App to get config from repo
+      var app = new App();
+      var config = await app.init();
+
+      // Step 2: If no token in config, set from URL params
+      if (!config || !config.token || config.token === 'YOUR_GITHUB_TOKEN_HERE') {
+        if (urlToken) {
+          config = config || {};
+          config.token = urlToken;
+          if (!config.repo) config.repo = 'hymanluo1978/inspection-system';
+          // Re-init storage with real token
+          app.config = config;
+          app.storage = new GithubStorage(config.token, config.repo, 'main');
+          app.configMgr = new ConfigManager(app.storage);
+          app.dataMgr = new DataManager(app.storage);
+          app.imageUploader = new ImageUploader(app.storage);
+        } else if (params.get('setup') === '1') {
+          // Launch setup wizard
+          if (headerEl) headerEl.textContent = '系统初始化';
+          var setup = new SetupHandler(app);
+          await setup.run();
+          return;
+        } else {
+          showError('缺少访问令牌', '请在 URL 中添加 ?token=你的GitHubToken\n或者访问 ?setup=1 进入初始化向导');
+          if(headerEl) headerEl.textContent = '系统未配置';
+          return;
+        }
+      }
+
+      // Step 3: Check redirect
+      if (config.redirectEnabled && config.redirectUrl) {
+        window.location.href = config.redirectUrl;
+        return;
+      }
+
+      // Step 4: Check form enabled
+      if (config.formEnabled === false) {
+        mainEl.innerHTML = '<div class="card" style="text-align:center;padding:40px;"><div style="font-size:3rem;margin-bottom:12px;">📋</div><h2>表单已暂停</h2><p style="color:var(--text-secondary);margin-top:8px;">管理员已暂停此表单，请稍后再试。</p></div>';
+        return;
+      }
+
+      // Step 4.5: Quick connectivity check
+      try {
+        var userUrl = 'https://api.github.com/user';
+        await fetch(userUrl, {
+          headers: { 'Authorization': 'Bearer ' + config.token, 'Accept': 'application/vnd.github.v3+json' }
+        });
+      } catch(_connErr) {
+        showError('无法连接 GitHub API', '请检查网络连接或 Token 是否有效。\n如果在中国大陆，可能需要配置代理或使用镜像。');
+        return;
+      }
+
+      // Step 5: Render form
+      if (headerEl) headerEl.textContent = config.siteName || '施工现场巡检';
+      mainEl.innerHTML = renderForm();
+
+      // Set default time
+      var now = new Date();
+      var localISO = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      var timeField = document.getElementById('field-inspection-time');
+      if (timeField) timeField.value = localISO;
+
+      // Step 6: Wire up photo buttons
+      var photoState = {
+        sitePhotos: [],
+        bathroomPhotos: [],
+        hiddenPhotos: { hw1:[], hw2:[], hw3:[], hw4:[] },
+        submitting: false
+      };
+
+      function wirePhotoAdd(btnId, inputId) {
+        var btn = document.getElementById(btnId);
+        var input = document.getElementById(inputId);
+        if (!btn || !input) return;
+        btn.addEventListener('click', function() { input.click(); });
+      }
+      wirePhotoAdd('site-photos-add', 'site-photos-input');
+      wirePhotoAdd('bathroom-photos-add', 'bathroom-photos-input');
+
+      // Hidden works photo
+      document.querySelectorAll('.hw-photo-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var hwId = btn.getAttribute('data-hw-id');
+          var inp = document.querySelector('.hw-photos-input[data-hw-input="'+hwId+'"]');
+          if (inp) inp.click();
+        });
+      });
+
+      function setupPhotoInput(inputId, gridId, countId, stateArr) {
+        var input = typeof inputId === 'string' ? document.getElementById(inputId) : inputId;
+        var grid = document.getElementById(gridId);
+        if (!input) return;
+        input.addEventListener('change', function() {
+          var files = Array.from(input.files);
+          if (!files.length) return;
+          files.forEach(function(f) { stateArr.push(f); });
+          if (grid) {
+            files.forEach(function(f) {
+              var r = new FileReader();
+              r.onload = function(e) {
+                var item = document.createElement('div');
+                item.className = 'photo-item';
+                item.innerHTML = '<img src="'+e.target.result+'" alt="照片">';
+                grid.appendChild(item);
+              };
+              r.readAsDataURL(f);
+            });
+          }
+          if (countId) {
+            document.getElementById(countId).textContent = '已选择 '+grid.querySelectorAll('.photo-item').length+' 张照片';
+          }
+          input.value = '';
+        });
+      }
+      setupPhotoInput('site-photos-input', 'site-photos-grid', 'site-photos-count', photoState.sitePhotos);
+      setupPhotoInput('bathroom-photos-input', 'bathroom-photos-grid', null, photoState.bathroomPhotos);
+      document.querySelectorAll('.hw-photos-input').forEach(function(inp) {
+        var hwId = inp.getAttribute('data-hw-input');
+        setupPhotoInput(inp, 'hw-grid-'+hwId, null, photoState.hiddenPhotos[hwId]);
+      });
+
+      // Step 7: Form submit
+      document.getElementById('inspection-form').addEventListener('submit', async function(e) {
+        e.preventDefault();
+        if (photoState.submitting) return;
+        photoState.submitting = true;
+        var btn = document.getElementById('submit-btn');
+        btn.disabled = true;
+        btn.innerHTML = '提交中...';
+
+        try {
+          var building = (document.getElementById('field-building').value || '').trim();
+          var unit = (document.getElementById('field-unit').value || '').trim();
+          var inspTime = document.getElementById('field-inspection-time').value;
+
+          // Field validation with visual feedback
+          var errors = [];
+          if (!building) { errors.push('楼号'); document.getElementById('field-building').style.borderColor = 'var(--danger)'; }
+          else { document.getElementById('field-building').style.borderColor = ''; }
+          if (!unit) { errors.push('房号'); document.getElementById('field-unit').style.borderColor = 'var(--danger)'; }
+          else { document.getElementById('field-unit').style.borderColor = ''; }
+          if (!inspTime) { errors.push('巡查时间'); document.getElementById('field-inspection-time').style.borderColor = 'var(--danger)'; }
+          else { document.getElementById('field-inspection-time').style.borderColor = ''; }
+          if (errors.length) { UI.toast('请填写：'+errors.join('、'),'error'); throw Error('stop'); }
+
+          // Gather data
+          function gatherMulti(containerId) {
+            var data = {};
+            var el = document.getElementById(containerId);
+            if (!el) return data;
+            el.querySelectorAll('[data-key]').forEach(function(inp) {
+              data[inp.getAttribute('data-key')] = inp.value.trim();
+            });
+            return data;
+          }
+          var safetyData = gatherMulti('safety-container');
+          var processData = gatherMulti('process-container');
+          var tileData = gatherMulti('tile-container');
+          var puttyData = gatherMulti('putty-container');
+
+          var hiddenData = [];
+          document.querySelectorAll('[data-hw]').forEach(function(grp) {
+            var hwId = grp.getAttribute('data-hw');
+            hiddenData.push({
+              name: (grp.querySelector('h4')||{}).textContent || '',
+              inspector: (grp.querySelector('[data-hw-field="inspector"]')||{}).value || '',
+              conclusion: (grp.querySelector('[data-hw-field="conclusion"]')||{}).value || '',
+              hwId: hwId
+            });
+          });
+
+          var bInspector = (document.getElementById('bathroom-inspector')||{}).value || '';
+          var bConclusion = (document.getElementById('bathroom-conclusion')||{}).value || '';
+
+          // Upload images
+          UI.toast('正在上传照片...', 'info');
+          var up = app.imageUploader;
+          var uw = config.uploadCompressWidth || 1200;
+          var uq = config.uploadQuality || 0.75;
+          var siteRes = photoState.sitePhotos.length ? await up.uploadImages(photoState.sitePhotos, uw, uq) : [];
+          var bathRes = photoState.bathroomPhotos.length ? await up.uploadImages(photoState.bathroomPhotos, uw, uq) : [];
+          var hiddenRes = {};
+          for (var hwId in photoState.hiddenPhotos) {
+            hiddenRes[hwId] = photoState.hiddenPhotos[hwId].length
+              ? (await up.uploadImages(photoState.hiddenPhotos[hwId], uw, uq)).map(function(r){return r.path;})
+              : [];
+          }
+
+          UI.toast('正在保存数据...', 'info');
+          var sub = {
+            basicInfo: { building:building, unit:unit, inspectionTime:inspTime },
+            safetyInspection: safetyData,
+            processCompletion: processData,
+            hiddenWorks: hiddenData.map(function(h){ return { name:h.name, inspector:h.inspector, conclusion:h.conclusion, photos:hiddenRes[h.hwId]||[] }; }),
+            sitePhotos: siteRes.map(function(r){return r.path;}),
+            tileMeasurement: tileData,
+            puttyMeasurement: puttyData,
+            bathroomTest: { inspector:bInspector, conclusion:bConclusion, photos:bathRes.map(function(r){return r.path;}) }
+          };
+
+          var result = await app.dataMgr.saveSubmission(sub);
+          mainEl.innerHTML = '<div class="card success-screen"><div class="icon">✅</div><h2>提交成功！</h2><p>巡检记录已保存至云端</p><div style="font-family:var(--font-mono);color:var(--accent);font-size:0.85rem;margin-bottom:16px;">记录编号: '+esc(result.id)+'</div><button class="btn btn-primary" onclick="location.reload()">继续填写</button></div>';
+          UI.toast('提交成功！', 'success');
+        } catch(e) {
+          if (e.message !== 'stop') UI.toast(e.message||'提交失败','error');
+          btn.disabled = false;
+          btn.textContent = '✅ 提交巡检记录';
+        } finally {
+          photoState.submitting = false;
+        }
+      });
+
+      // Progress dots
+      (function updateProgress() {
+        var groups = document.querySelectorAll('[data-group]');
+        var dots = document.getElementById('form-progress');
+        if (!dots || !groups.length) return;
+        if (!dots.children.length) { groups.forEach(function(){ var d=document.createElement('div'); d.className='dot'; dots.appendChild(d); }); }
+        var st = window.scrollY + window.innerHeight/2;
+        groups.forEach(function(g,i){
+          var t = g.getBoundingClientRect().top + window.scrollY;
+          dots.children[i].className = st >= t ? 'dot active' : 'dot';
+        });
+      })();
+      window.addEventListener('scroll', function(){
+        var groups = document.querySelectorAll('[data-group]');
+        var dots = document.getElementById('form-progress');
+        if (!dots || !groups.length) return;
+        var st = window.scrollY + window.innerHeight/2;
+        groups.forEach(function(g,i){
+          var t = g.getBoundingClientRect().top + window.scrollY;
+          dots.children[i].className = st >= t ? 'dot active' : 'dot';
+        });
+      });
+
+      console.log('✅ 巡检表单加载成功');
+
+    } catch(e) {
+      console.error('❌ 初始化失败:', e);
+      showError('系统初始化失败: '+e.message, e.stack);
+    }
+  })();
+})();
+</script>
+</body>
+</html>

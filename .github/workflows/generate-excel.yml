@@ -1,0 +1,264 @@
+name: 自动生成巡检台账
+
+on:
+  push:
+    paths:
+      - 'data/*.json'
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  generate-excel:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # 确保能读取到最新提交的数据
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: 安装 xlsx 库
+        run: |
+          npm init -y
+          npm install xlsx@0.18.5
+
+      - name: 合并 JSON 并生成台账（Markdown + Excel）
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            const XLSX = require('xlsx');
+
+            // 读取所有 JSON 数据文件
+            const dataDir = 'data';
+            const submissions = [];
+
+            if (fs.existsSync(dataDir)) {
+              const files = fs.readdirSync(dataDir)
+                .filter(f => f.endsWith('.json') && f !== '.gitkeep')
+                .sort()
+                .reverse(); // 最新的在前
+
+              for (const file of files) {
+                try {
+                  const content = fs.readFileSync(path.join(dataDir, file), 'utf-8');
+                  const data = JSON.parse(content);
+                  submissions.push(data);
+                } catch (e) {
+                  console.warn(`跳过异常文件 ${file}: ${e.message}`);
+                }
+              }
+            }
+
+            console.log(`共读取 ${submissions.length} 条记录`);
+
+            // ================================================================
+            // 1. 生成 Markdown 汇总报告
+            // ================================================================
+            let md = `# 巡检台账汇总\n\n`;
+            md += `> 生成时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}\n`;
+            md += `> 总记录数: ${submissions.length}\n\n`;
+
+            if (submissions.length === 0) {
+              md += '暂无数据\n';
+              fs.writeFileSync('台账汇总.md', md);
+              console.log('无数据，生成空报告');
+              // 仍生成一个空 Excel
+              const emptyWb = XLSX.utils.book_new();
+              const emptyWs = XLSX.utils.aoa_to_sheet([['暂无数据']]);
+              XLSX.utils.book_append_sheet(emptyWb, emptyWs, '汇总');
+              XLSX.writeFile(emptyWb, '台账汇总.xlsx');
+              return;
+            }
+
+            // 基础信息表
+            md += `## 一、巡检记录列表\n\n`;
+            md += `| 序号 | 记录编号 | 提交时间 | 楼号 | 房号 | 巡查时间 | 照片数 |\n`;
+            md += `|------|----------|----------|------|------|----------|--------|\n`;
+
+            submissions.forEach((s, i) => {
+              const photoCount = (s.sitePhotos?.length || 0) +
+                (s.hiddenWorks?.reduce((a, h) => a + (h.photos?.length || 0), 0) || 0) +
+                (s.bathroomTest?.photos?.length || 0);
+              md += `| ${submissions.length - i} | ${s.id || '-'} | ${s._savedAt ? new Date(s._savedAt).toLocaleString('zh-CN') : '-'} | ${s.basicInfo?.building || '-'} | ${s.basicInfo?.unit || '-'} | ${s.basicInfo?.inspectionTime || '-'} | ${photoCount} |\n`;
+            });
+
+            // 安全巡查汇总
+            md += `\n## 二、安全巡查详情\n\n`;
+            submissions.forEach((s) => {
+              md += `### ${s.basicInfo?.building || '?'}#${s.basicInfo?.unit || '?'} (${s.id})\n\n`;
+              md += `| 项目 | 情况 |\n|------|------|\n`;
+              if (s.safetyInspection) {
+                Object.entries(s.safetyInspection).forEach(([k, v]) => {
+                  md += `| ${k} | ${v || '-'} |\n`;
+                });
+              }
+              md += `\n`;
+            });
+
+            // 工序完成情况
+            md += `\n## 三、工序完成情况\n\n`;
+            submissions.forEach((s) => {
+              md += `### ${s.basicInfo?.building || '?'}#${s.basicInfo?.unit || '?'} (${s.id})\n\n`;
+              md += `| 工序 | 完成情况 |\n|------|----------|\n`;
+              if (s.processCompletion) {
+                Object.entries(s.processCompletion).forEach(([k, v]) => {
+                  md += `| ${k} | ${v || '-'} |\n`;
+                });
+              }
+              md += `\n`;
+            });
+
+            // 隐蔽验收
+            md += `\n## 四、隐蔽验收\n\n`;
+            submissions.forEach((s) => {
+              md += `### ${s.basicInfo?.building || '?'}#${s.basicInfo?.unit || '?'} (${s.id})\n\n`;
+              md += `| 验收项目 | 验收人 | 结论 |\n|----------|--------|------|\n`;
+              if (s.hiddenWorks) {
+                s.hiddenWorks.forEach(h => {
+                  md += `| ${h.name} | ${h.inspector || '-'} | ${h.conclusion || '-'} |\n`;
+                });
+              }
+              md += `\n`;
+            });
+
+            // 实测实量
+            const hasTile = submissions.some(s => s.tileMeasurement && Object.keys(s.tileMeasurement).length > 0);
+            const hasPutty = submissions.some(s => s.puttyMeasurement && Object.keys(s.puttyMeasurement).length > 0);
+
+            if (hasTile || hasPutty) {
+              md += `\n## 五、实测实量\n\n`;
+              submissions.forEach((s) => {
+                md += `### ${s.basicInfo?.building || '?'}#${s.basicInfo?.unit || '?'} (${s.id})\n\n`;
+                if (s.tileMeasurement && Object.keys(s.tileMeasurement).length > 0) {
+                  md += `**墙地砖空鼓实测:**\n\n| 项目 | 值 |\n|------|-----|\n`;
+                  Object.entries(s.tileMeasurement).forEach(([k, v]) => {
+                    md += `| ${k} | ${v || '-'} |\n`;
+                  });
+                  md += `\n`;
+                }
+                if (s.puttyMeasurement && Object.keys(s.puttyMeasurement).length > 0) {
+                  md += `**腻子面实测合格率:**\n\n| 项目 | 值 |\n|------|-----|\n`;
+                  Object.entries(s.puttyMeasurement).forEach(([k, v]) => {
+                    md += `| ${k} | ${v || '-'} |\n`;
+                  });
+                  md += `\n`;
+                }
+              });
+            }
+
+            // 卫生间蓄水验收
+            const hasBathroom = submissions.some(s => s.bathroomTest?.inspector || s.bathroomTest?.conclusion);
+            if (hasBathroom) {
+              md += `\n## 六、卫生间蓄水验收\n\n`;
+              submissions.forEach((s) => {
+                if (s.bathroomTest?.inspector || s.bathroomTest?.conclusion) {
+                  md += `| ${s.basicInfo?.building || '?'}#${s.basicInfo?.unit || '?'} (${s.id}) | 验收人: ${s.bathroomTest.inspector || '-'} | 结论: ${s.bathroomTest.conclusion || '-'} |\n`;
+                }
+              });
+              md += `\n`;
+            }
+
+            fs.writeFileSync('台账汇总.md', md);
+            console.log('✓ Markdown 台账已生成');
+
+            // ================================================================
+            // 2. 生成 Excel 台账（与前端 ExcelExporter 保持一致的 4 个 Sheet）
+            // ================================================================
+            const wb = XLSX.utils.book_new();
+
+            // Sheet 1: 汇总
+            const summaryData = submissions.map((s, i) => ({
+              '序号': i + 1,
+              '记录编号': s.id || '',
+              '提交时间': s._savedAt ? new Date(s._savedAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' }) : '',
+              '楼号': s.basicInfo?.building || '',
+              '房号': s.basicInfo?.unit || '',
+              '巡查时间': s.basicInfo?.inspectionTime || '',
+              '临时用电': s.safetyInspection?.['临时用电'] || '',
+              '临边防护': s.safetyInspection?.['临边防护'] || '',
+              '灭火器': s.safetyInspection?.['灭火器'] || '',
+              '水枪水带': s.safetyInspection?.['水枪水带'] || '',
+              '登高作业': s.safetyInspection?.['登高作业'] || '',
+              '动火作业': s.safetyInspection?.['动火作业'] || '',
+              '卫生情况': s.safetyInspection?.['卫生情况'] || '',
+            }));
+            const ws1 = XLSX.utils.json_to_sheet(summaryData);
+            XLSX.utils.book_append_sheet(wb, ws1, '汇总');
+
+            // Sheet 2: 工序完成情况
+            const processData = submissions.map((s, i) => {
+              const pc = s.processCompletion || {};
+              return { '序号': i + 1, '记录编号': s.id || '', ...pc };
+            });
+            if (processData.length > 0) {
+              const ws2 = XLSX.utils.json_to_sheet(processData);
+              XLSX.utils.book_append_sheet(wb, ws2, '工序完成情况');
+            }
+
+            // Sheet 3: 隐蔽验收
+            const hiddenData = [];
+            submissions.forEach((s, i) => {
+              (s.hiddenWorks || []).forEach((h, j) => {
+                hiddenData.push({
+                  '序号': `${i + 1}-${j + 1}`,
+                  '记录编号': s.id || '',
+                  '验收项目': h.name || '',
+                  '验收人': h.inspector || '',
+                  '验收结论': h.conclusion || '',
+                });
+              });
+            });
+            if (hiddenData.length > 0) {
+              const ws3 = XLSX.utils.json_to_sheet(hiddenData);
+              XLSX.utils.book_append_sheet(wb, ws3, '隐蔽验收');
+            }
+
+            // Sheet 4: 实测实量
+            const measData = submissions.map((s, i) => ({
+              '序号': i + 1,
+              '记录编号': s.id || '',
+              '楼号': s.basicInfo?.building || '',
+              '房号': s.basicInfo?.unit || '',
+              '墙地空鼓实测人': s.tileMeasurement?.实测人 || '',
+              '墙地空鼓实测时间': s.tileMeasurement?.实测时间 || '',
+              '墙地砖空鼓': s.tileMeasurement?.['墙地砖空鼓'] || '',
+              '高低差': s.tileMeasurement?.高低差 || '',
+              '垂直度(墙地)': s.tileMeasurement?.垂直度 || '',
+              '平整度(墙地)': s.tileMeasurement?.平整度 || '',
+              '阴阳角(墙地)': s.tileMeasurement?.阴阳角 || '',
+              '腻子实测人': s.puttyMeasurement?.实测人 || '',
+              '腻子实测时间': s.puttyMeasurement?.实测时间 || '',
+              '顶棚极差': s.puttyMeasurement?.顶棚极差 || '',
+              '阴阳角(腻子)': s.puttyMeasurement?.阴阳角 || '',
+              '垂直度(腻子)': s.puttyMeasurement?.垂直度 || '',
+              '平整度(腻子)': s.puttyMeasurement?.平整度 || '',
+              '三边两线': s.puttyMeasurement?.三边两线 || '',
+              '阴阳角直线度': s.puttyMeasurement?.阴阳角直线度 || '',
+            }));
+            if (measData.length > 0) {
+              const ws4 = XLSX.utils.json_to_sheet(measData);
+              XLSX.utils.book_append_sheet(wb, ws4, '实测实量');
+            }
+
+            XLSX.writeFile(wb, '台账汇总.xlsx');
+            console.log('✓ Excel 台账已生成');
+
+      - name: 提交台账文件
+        run: |
+          git config user.name "巡检系统Bot"
+          git config user.email "inspection-bot@users.noreply.github.com"
+          git add 台账汇总.md 台账汇总.xlsx
+          git diff --quiet && git diff --staged --quiet || git commit -m "📊 自动生成巡检台账 [$(date +'%Y-%m-%d %H:%M')]"
+          git push

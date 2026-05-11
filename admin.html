@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
+<meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#0a0e14">
 <title>巡检系统管理后台</title>
@@ -739,10 +740,15 @@ class AdminController {
 
   async _exportExcel() {
     try {
-      UI.toast('正在生成 Excel...', 'info');
+      const dataToExport = this.searchQuery ? this._getFilteredData() : this.submissions;
+      if (dataToExport.length === 0) {
+        UI.toast('没有可导出的数据', 'warning');
+        return;
+      }
+      UI.toast(`正在生成 Excel（${dataToExport.length} 条记录）...`, 'info');
       const filename = `巡检台账_${new Date().toISOString().slice(0, 10)}.xlsx`;
-      await ExcelExporter.export(this.submissions, filename);
-      UI.toast('导出成功！', 'success');
+      await ExcelExporter.export(dataToExport, filename);
+      UI.toast(`导出成功！共 ${dataToExport.length} 条记录`, 'success');
     } catch (e) {
       UI.toast('导出失败: ' + e.message, 'error');
     }

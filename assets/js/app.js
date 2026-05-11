@@ -392,7 +392,16 @@ class ExcelExporter {
   static async export(submissions, filename = '巡检台账.xlsx') {
     // Load SheetJS from CDN if not available
     if (typeof XLSX === 'undefined') {
-      await ExcelExporter._loadSheetJS();
+      try {
+        await ExcelExporter._loadSheetJS();
+      } catch(e) {
+        // Fallback to alternative CDN
+        try {
+          await ExcelExporter._loadSheetJS('cdnjs');
+        } catch(e2) {
+          throw new Error('无法加载 Excel 库，请检查网络连接');
+        }
+      }
     }
 
     const wb = XLSX.utils.book_new();
@@ -414,6 +423,9 @@ class ExcelExporter {
       '卫生情况': s.safetyInspection?.['卫生情况'] || '',
     }));
     const ws1 = XLSX.utils.json_to_sheet(summaryData);
+    // Auto-fit column widths
+    const colWidths = Object.keys(summaryData[0] || {}).map(() => ({ wch: 14 }));
+    ws1['!cols'] = colWidths;
     XLSX.utils.book_append_sheet(wb, ws1, '汇总');
 
     // Sheet 2: Process completion
@@ -438,6 +450,8 @@ class ExcelExporter {
         hiddenData.push({
           '序号': `${i + 1}-${j + 1}`,
           '记录编号': s.id || '',
+          '楼号': s.basicInfo?.building || '',
+          '房号': s.basicInfo?.unit || '',
           '验收项目': h.name || '',
           '验收人': h.inspector || '',
           '验收结论': h.conclusion || '',
@@ -476,6 +490,26 @@ class ExcelExporter {
       XLSX.utils.book_append_sheet(wb, ws4, '实测实量');
     }
 
+    // Sheet 5: Bathroom test
+    const bathData = [];
+    submissions.forEach((s, i) => {
+      if (s.bathroomTest?.inspector || s.bathroomTest?.conclusion || (s.bathroomTest?.photos || []).length > 0) {
+        bathData.push({
+          '序号': i + 1,
+          '记录编号': s.id || '',
+          '楼号': s.basicInfo?.building || '',
+          '房号': s.basicInfo?.unit || '',
+          '验收人': s.bathroomTest?.inspector || '',
+          '验收结论': s.bathroomTest?.conclusion || '',
+          '照片数': (s.bathroomTest?.photos || []).length,
+        });
+      }
+    });
+    if (bathData.length > 0) {
+      const ws5 = XLSX.utils.json_to_sheet(bathData);
+      XLSX.utils.book_append_sheet(wb, ws5, '卫生间蓄水验收');
+    }
+
     // Generate and download
     XLSX.writeFile(wb, filename);
     return filename;
@@ -486,13 +520,18 @@ class ExcelExporter {
     try { return new Date(d).toLocaleString('zh-CN'); } catch { return d; }
   }
 
-  static _loadSheetJS() {
+  static _loadSheetJS(cdn = 'default') {
     return new Promise((resolve, reject) => {
       if (typeof XLSX !== 'undefined') { resolve(); return; }
+      const urls = {
+        'default': 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+        'cdnjs': 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+        'unpkg': 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js',
+      };
       const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      script.src = urls[cdn] || urls['default'];
       script.onload = resolve;
-      script.onerror = () => reject(new Error('SheetJS加载失败，请检查网络'));
+      script.onerror = () => reject(new Error(`SheetJS加载失败 (CDN: ${cdn})`));
       document.head.appendChild(script);
     });
   }
